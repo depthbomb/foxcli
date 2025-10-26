@@ -1,0 +1,37 @@
+[build-system]
+requires = ['hatchling>=1.27.0']
+build-backend = 'hatchling.build'
+
+[project]
+name = 'foxcli'
+dynamic = ['version']
+description = 'A lightweight and minimal CLI framework'
+readme = 'README.md'
+requires-python = '>=3.12'
+license = { text = 'MIT' }
+license-files = ['LICEN[CS]E*']
+authors = [{ name = 'depthbomb' }]
+keywords = ['cli', 'framework']
+classifiers = [
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3 :: Only',
+    'License :: OSI Approved :: MIT License',
+    'Operating System :: OS Independent',
+    'Natural Language :: English',
+    'Topic :: Software Development',
+    'Topic :: Software Development :: Libraries',
+    'Topic :: Software Development :: Libraries :: Application Frameworks',
+    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Topic :: Terminals',
+    'Typing :: Typed'
+]
+
+[tool.hatch.version]
+path = 'foxcli/__init__.py'
+
+[project.urls]
+Repository = 'https://github.com/depthbomb/foxcli'
+Issues = 'https://github.com/depthbomb/foxcli/issues'
+Changelog = 'https://github.com/depthbomb/foxcli/blob/master/CHANGELOG.md'
