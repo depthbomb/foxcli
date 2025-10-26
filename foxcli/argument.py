@@ -7,3 +7,5 @@ class Argument:
     default: Optional[Any] = None
     choices: Optional[list[Any]] = None
     nargs: Optional[Union[str, int]] = None
+
+Arg = Argument

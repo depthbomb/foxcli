@@ -24,3 +24,5 @@ class Option:
         self.action = action
         self.choices = choices
         self.nargs = nargs
+
+Opt = Option
