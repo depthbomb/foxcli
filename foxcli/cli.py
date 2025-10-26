@@ -9,7 +9,7 @@ class CLI:
     def __init__(
         self,
         name: str,
-        version: str = '',
+        version: str,
         description: str = '',
         stdin: Optional[TextIO] = None,
         stdout: Optional[TextIO] = None,
