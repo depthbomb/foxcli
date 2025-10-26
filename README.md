@@ -11,6 +11,12 @@ This framework features:
 
 foxcli is still very much in early development but certainly usable, in fact I am using it in a testdrive with my project [WinUtils](https://github.com/depthbomb/winutils)!
 
+# Installation
+
+```shell
+pip install foxcli
+```
+
 # Sample
 
 ```py
