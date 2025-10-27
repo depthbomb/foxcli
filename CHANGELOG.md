@@ -1,5 +1,9 @@
 # 10/27/2025
 
+## 0.3.1
+
+- Also make parsed args and options accessible in `Command` classes from `self.ctx.args`
+
 ## 0.3.0
 
 - Major rewrite

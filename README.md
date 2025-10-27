@@ -1,5 +1,5 @@
 > [!IMPORTANT]
-> While foxcli is in development, breaking changes may be made without bumping the major version!
+> While foxcli is pre-1.0.0, breaking changes may be made without bumping the major version!
 
 _foxcli_ is a minimal-by-design CLI framework for Python.
 

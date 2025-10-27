@@ -11,6 +11,7 @@ class CommandContext:
     def __init__(
         self,
         global_options: ArgAccessor,
+        args: ArgAccessor,
         registry: CommandRegistry,
         cli: 'CLI',
         stdin=None,
@@ -18,6 +19,7 @@ class CommandContext:
         stderr=None
     ):
         self.global_options = global_options
+        self.args = args
         self.registry = registry
         self.cli = cli
         self.stdin = stdin or sys.stdin

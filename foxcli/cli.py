@@ -253,17 +253,18 @@ class CLI:
 
         try:
             parsed = self._parse_args(argv)
+            accessor = ArgAccessor({**parsed.parsed_args, **parsed.options})
 
             ctx = CommandContext(
                 global_options=ArgAccessor(parsed.global_options),
+                args=accessor,
                 registry=self.registry,
                 cli=self
             )
 
             command = parsed.command_class(ctx)
-            accessor = ArgAccessor({**parsed.parsed_args, **parsed.options})
 
-            return command.run(accessor)
+            return command.run(ctx.args)
         except Exception as e:
             # TODO make this overrideable
             print(f'Error: {e}', file=sys.stderr)
