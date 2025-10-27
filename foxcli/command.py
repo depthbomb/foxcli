@@ -42,9 +42,6 @@ class Command:
                         options.append(opt)
 
         return options
-
-    def run(self, args: ArgAccessor) -> int:
-        raise NotImplementedError
     
     @classmethod
     def get_info(cls) -> CommandInfo:
@@ -54,3 +51,12 @@ class Command:
             aliases=cls.aliases,
             doc=cls.__doc__
         )
+
+    def pre_run(self, args: ArgAccessor):
+        pass
+
+    def run(self, args: ArgAccessor) -> int:
+        raise NotImplementedError
+
+    def post_run(self, args: ArgAccessor):
+        pass

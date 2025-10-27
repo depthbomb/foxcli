@@ -299,8 +299,11 @@ class CLI:
 
             command = parsed.command_class()
             command.ctx = self.ctx
+            command.pre_run(self.ctx.args)
+            exit_code = command.run(self.ctx.args)
+            command.post_run(self.ctx.args)
 
-            return command.run(self.ctx.args)
+            return exit_code
         except Exception as e:
             for exc_type, hook_name in self._HOOKS.items():
                 if isinstance(e, exc_type):

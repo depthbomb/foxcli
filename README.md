@@ -13,12 +13,17 @@ This framework features:
 - Multi-level commands (like `user create`)
 - Global options that can appear anywhere in command invocation
 - Hooks to customize error handling
+- Pre-run and post-run hooks for commands
 
 foxcli is still very much in early development but certainly usable, in fact I am using it in a testdrive with my project [WinUtils](https://github.com/depthbomb/winutils)!
 
 Planned features include:
 
 - Counted arguments like `-vvv`
+
+Current limitations:
+
+- Only the pre-run and post-run command hooks furthest down the chain will be called
 
 # Installation
 
@@ -36,10 +41,7 @@ from foxcli.argument import Argument
 from foxcli.option import Opt, Option
 
 class App(CLI):
-    # hooks to customize error handling
-    def on_unknown_command(self, e):
-        # command not found, show a custom usage message?
-        return 1
+    pass
 
 app = App(
     name='myapp',
@@ -56,8 +58,19 @@ class Version(Command):
     name = 'version'
     description = 'Show version'
 
+    def __init__(self):
+        self._version = '0.0.0'
+
+    def pre_run(self, args):
+        # runs before `run`
+        self._version = self.ctx.cli.version
+
+    def post_run(self, args):
+        # runs after `run`
+        pass
+
     def run(self, args) -> int:
-        print(self.ctx.cli.version)
+        print(self._version)  # '1.0.0'
         return 0
 
 # subclassing `Command` to add options
@@ -98,4 +111,5 @@ class UserCreate(UserableCommand):
         return 0
 
 exit(app.run())
+
 ```
