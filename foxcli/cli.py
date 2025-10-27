@@ -297,7 +297,8 @@ class CLI:
                 cli=self
             )
 
-            command = parsed.command_class(self.ctx)
+            command = parsed.command_class()
+            command.ctx = self.ctx
 
             return command.run(self.ctx.args)
         except Exception as e:

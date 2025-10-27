@@ -1,3 +1,4 @@
+from typing import Optional
 from foxcli.option import Option
 from foxcli.argument import Argument
 from foxcli.command_info import CommandInfo
@@ -10,9 +11,7 @@ class Command:
     aliases: list[str] = []
     arguments: list[Argument] = []
     options: list[Option] = []
-
-    def __init__(self, ctx: CommandContext):
-        self.ctx = ctx
+    ctx: Optional[CommandContext] = None
 
     @classmethod
     def get_all_arguments(cls) -> list[Argument]:

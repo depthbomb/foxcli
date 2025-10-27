@@ -1,5 +1,9 @@
 # 10/27/2025
 
+## 0.4.1
+
+- Classes that subclass `Command` can now have a constructor
+
 ## 0.4.0
 
 - Also make parsed args and options accessible in `Command` classes from `self.ctx.args`
