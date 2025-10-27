@@ -1,4 +1,4 @@
-> [!IMPORTANT]
+from cli import UnknownCommandError> [!IMPORTANT]
 > While foxcli is pre-1.0.0, breaking changes may be made without bumping the major version!
 
 _foxcli_ is a minimal-by-design CLI framework for Python.
@@ -12,13 +12,13 @@ This framework features:
 - Class-based commands + being able to subclass its `Command` class
 - Multi-level commands (like `user create`)
 - Global options that can appear anywhere in command invocation
+- Hooks to customize error handling
 
 foxcli is still very much in early development but certainly usable, in fact I am using it in a testdrive with my project [WinUtils](https://github.com/depthbomb/winutils)!
 
 Planned features include:
 
 - Counted arguments like `-vvv`
-- Overriding error messages
 
 # Installation
 
@@ -35,7 +35,13 @@ from foxcli.command import Command
 from foxcli.argument import Argument
 from foxcli.option import Opt, Option
 
-app = CLI(
+class App(CLI):
+    # hooks to customize error handling
+    def on_unknown_command(self, e):
+        # command not found, show a custom usage message?
+        return 1
+
+app = App(
     name='myapp',
     version='1.0.0',
     description='My app',

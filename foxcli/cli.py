@@ -1,14 +1,33 @@
 import sys
-from typing import Any, Optional
 from foxcli.option import Option
 from foxcli.command import Command
 from foxcli.argument import Argument
+from typing import Any, Type, Optional
 from foxcli.arg_accessor import ArgAccessor
 from foxcli.parsed_command import ParsedCommand
 from foxcli.command_context import CommandContext
 from foxcli.command_registry import CommandRegistry
 
+class InvalidArgumentValueCountError(Exception): pass
+class MissingOptionValueError(Exception): pass
+class MissingRequiredArgumentError(Exception): pass
+class MissingRequiredOptionError(Exception): pass
+class NoCommandError(Exception): pass
+class UnexpectedArgumentsError(Exception): pass
+class UnknownCommandError(Exception): pass
+
 class CLI:
+    _HOOKS: dict[Type[BaseException], str] = {
+        InvalidArgumentValueCountError: 'on_invalid_argument_value_count',
+        MissingOptionValueError: 'on_missing_option_value',
+        MissingRequiredArgumentError: 'on_missing_required_argument',
+        MissingRequiredOptionError: 'on_missing_required_option',
+        NoCommandError: 'on_no_command',
+        UnexpectedArgumentsError: 'on_unexpected_arguments',
+        UnknownCommandError: 'on_unknown_command',
+        Exception: 'on_error',
+    }
+
     def __init__(
         self,
         name: str,
@@ -21,18 +40,25 @@ class CLI:
         self.description = description
         self.global_options = global_options or []
         self.registry = CommandRegistry()
+        self.ctx: Optional[CommandContext] = None
 
-    def command(self, parent: Optional[str] = None):
-        def decorator(cls: type[Command]) -> type[Command]:
-            self.registry.register(cls, parent)
-            return cls
+    #region Hooks
+    def on_invalid_argument_value_count(self, e: InvalidArgumentValueCountError) -> int: pass
+    def on_missing_option_value(self, e: MissingOptionValueError) -> int: pass
+    def on_missing_required_argument(self, e: MissingRequiredArgumentError) -> int: pass
+    def on_missing_required_option(self, e: MissingRequiredOptionError) -> int: pass
+    def on_no_command(self, e: NoCommandError) -> int: pass
+    def on_unexpected_arguments(self, e: UnexpectedArgumentsError) -> int: pass
+    def on_unknown_command(self, e: UnknownCommandError) -> int: pass
+    def on_error(self, e: Exception) -> int: pass
+    #endregion
 
-        return decorator
-
-    register = command  # TODO would 'register' make more sense than 'command`?
-
+    #region Privates
     def _parse_args(self, argv: list[str]) -> ParsedCommand:
         args = argv[1:]  # skip program name
+
+        if len(args) == 0:
+            raise NoCommandError()
 
         global_opts, remaining = self._parse_options(args, self.global_options)
 
@@ -54,7 +80,7 @@ class CLI:
                 break
 
         if not command_class:
-            raise ValueError(f'Unknown command: {' '.join(remaining)}')
+            raise UnknownCommandError(f'Unknown command: {' '.join(remaining)}')
 
         # remove command path from remaining args
         remaining = remaining[len(command_path):]
@@ -84,7 +110,7 @@ class CLI:
             if pos_idx >= len(positional):
                 # no more positional args available
                 if arg_def.required and arg_def.default is None:
-                    raise ValueError(f'Missing required argument: {arg_def.name}')
+                    raise MissingRequiredArgumentError(f'Missing required argument: {arg_def.name}')
 
                 parsed[arg_def.name] = arg_def.default
                 continue
@@ -119,7 +145,7 @@ class CLI:
             elif arg_def.nargs == '+':
                 # one or more
                 if pos_idx >= len(positional):
-                    raise ValueError(f'Argument {arg_def.name} requires at least one value')
+                    raise InvalidArgumentValueCountError(f'Argument {arg_def.name} requires at least one value')
 
                 values = []
                 while pos_idx < len(positional):
@@ -133,7 +159,7 @@ class CLI:
             elif isinstance(arg_def.nargs, int):
                 # exact count
                 if pos_idx + arg_def.nargs > len(positional):
-                    raise ValueError(
+                    raise InvalidArgumentValueCountError(
                         f'Argument {arg_def.name} requires {arg_def.nargs} values, '
                         f'got {len(positional) - pos_idx}'
                     )
@@ -150,7 +176,7 @@ class CLI:
 
         if pos_idx < len(positional):
             unused = positional[pos_idx:]
-            raise ValueError(f'Unexpected arguments: {', '.join(unused)}')
+            raise UnexpectedArgumentsError(f'Unexpected arguments: {', '.join(unused)}')
 
         return parsed
 
@@ -212,7 +238,7 @@ class CLI:
                             parsed[opt.name] = True
                             i += 1
                         elif expects_value and opt.required:
-                            raise ValueError(f'Option {arg} requires a value')
+                            raise MissingOptionValueError(f'Option {arg} requires a value')
                         else:
                             parsed[opt.name] = opt.default
                             i += 1
@@ -226,7 +252,7 @@ class CLI:
         for opt in options:
             if opt.name not in parsed:
                 if opt.required:
-                    raise ValueError(f'Required option --{opt.name} not provided')
+                    raise MissingRequiredOptionError(f'Required option --{opt.name} not provided')
 
                 parsed[opt.name] = opt.default
 
@@ -246,26 +272,39 @@ class CLI:
             return float(value)
 
         return value
+    #endregion
+
+    def command(self, parent: Optional[str] = None):
+        def decorator(cls: type[Command]) -> type[Command]:
+            self.registry.register(cls, parent)
+            return cls
+
+        return decorator
+
+    register = command  # TODO would 'register' make more sense than 'command`?
 
     def run(self, argv: Optional[list[str]] = None) -> int:
-        if argv is None:
-            argv = sys.argv
+        argv = argv or sys.argv
 
         try:
             parsed = self._parse_args(argv)
             accessor = ArgAccessor({**parsed.parsed_args, **parsed.options})
 
-            ctx = CommandContext(
+            self.ctx = CommandContext(
                 global_options=ArgAccessor(parsed.global_options),
                 args=accessor,
                 registry=self.registry,
                 cli=self
             )
 
-            command = parsed.command_class(ctx)
+            command = parsed.command_class(self.ctx)
 
-            return command.run(ctx.args)
+            return command.run(self.ctx.args)
         except Exception as e:
-            # TODO make this overrideable
-            print(f'Error: {e}', file=sys.stderr)
+            for exc_type, hook_name in self._HOOKS.items():
+                if isinstance(e, exc_type):
+                    if hook_name in self.__class__.__dict__:
+                        return getattr(self, hook_name)(e)
+
+            print(f'{e.__class__.__name__}: {e}', file=sys.stderr)
             return 1
