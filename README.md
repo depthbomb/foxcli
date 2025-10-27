@@ -1,4 +1,4 @@
-> ![IMPORTANT]
+> [!IMPORTANT]
 > While foxcli is in development, breaking changes may be made without bumping the major version!
 
 _foxcli_ is a minimal-by-design CLI framework for Python built around argparse.
