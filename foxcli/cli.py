@@ -1,218 +1,270 @@
 import sys
+from typing import Any, Optional
 from foxcli.option import Option
+from foxcli.command import Command
 from foxcli.argument import Argument
-from foxcli.command import Command, CommandInfo
-from argparse import ArgumentParser, _SubParsersAction, RawDescriptionHelpFormatter
-from typing import Any, Type, TextIO, Optional, get_args, Annotated, get_origin, get_type_hints
+from foxcli.arg_accessor import ArgAccessor
+from foxcli.parsed_command import ParsedCommand
+from foxcli.command_context import CommandContext
+from foxcli.command_registry import CommandRegistry
 
 class CLI:
     def __init__(
         self,
         name: str,
         version: str,
-        description: str = '',
-        stdin: Optional[TextIO] = None,
-        stdout: Optional[TextIO] = None,
-        stderr: Optional[TextIO] = None,
+        description: str,
+        global_options: Optional[list[Option]] = None
     ):
         self.name = name
         self.version = version
         self.description = description
-        self.stdin = stdin or sys.stdin
-        self.stdout = stdout or sys.stdout
-        self.stderr = stderr or sys.stderr
+        self.global_options = global_options or []
+        self.registry = CommandRegistry()
 
-        self._parser = ArgumentParser(
-            prog=name,
-            description=description,
-            formatter_class=RawDescriptionHelpFormatter,
-        )
-        self._subparsers = self._parser.add_subparsers(dest='command', help='Available commands')
-        self._commands: dict[str, tuple[Type[Command], list[str], list[str]]] = {}
-        self._command_info: dict[str, CommandInfo] = {}
-        self._global_fields: dict[str, tuple[Any, Any]] = {}
+    def command(self, parent: Optional[str] = None):
+        def decorator(cls: type[Command]) -> type[Command]:
+            self.registry.register(cls, parent)
+            return cls
 
-        hints = get_type_hints(self.__class__, include_extras=True)
+        return decorator
 
-        for attr_name, hint in hints.items():
-            if get_origin(hint) is Annotated:
-                args = get_args(hint)
-                if len(args) >= 2 and isinstance(args[1], Option):
-                    opt = args[1]
-                    default = getattr(self, attr_name, None)
-                    self._global_fields[attr_name] = (opt, default)
+    register = command  # TODO would 'register' make more sense than 'command`?
 
-                    kwargs = {'help': opt.help}
-                    if default is not None:
-                        kwargs['default'] = default
-                    if opt.action:
-                        kwargs['action'] = opt.action
-                    elif args[0] == bool:
-                        kwargs['action'] = 'store_true' if not default else 'store_false'
-                    if opt.choices:
-                        kwargs['choices'] = opt.choices
+    def _parse_args(self, argv: list[str]) -> ParsedCommand:
+        args = argv[1:]  # skip program name
 
-                    self._parser.add_argument(*opt.names, **kwargs)
+        global_opts, remaining = self._parse_options(args, self.global_options)
 
-    def register(
-        self,
-        command_cls: Type[Command],
-        path: Optional[list[str]] = None,
-        aliases: Optional[list[str]] = None,
-    ) -> None:
-        if path is None:
-            path = [self._class_to_command_name(command_cls.__name__)]
+        command_path = []
+        command_class = None
 
-        aliases = aliases or []
-        command_name = '-'.join(path)
+        for i, arg in enumerate(remaining):
+            if arg.startswith('-'):
+                break
 
-        self._commands[command_name] = (command_cls, path, aliases)
-        self._command_info[command_name] = CommandInfo(
-            name=command_name,
-            path=path,
-            description=command_cls.__doc__.strip() if command_cls.__doc__ else '',
-            aliases=aliases,
-            doc=command_cls.__doc__,
-            cls=command_cls,
-        )
-
-        parser = self._subparsers
-        subparser_cache = {}
-        for i, segment in enumerate(path):
-            is_last = i == len(path) - 1
-
-            if is_last:
-                cmd_parser = parser.add_parser(
-                    segment,
-                    help=command_cls.__doc__.strip() if command_cls.__doc__ else '',
-                    aliases=aliases,
-                    formatter_class=RawDescriptionHelpFormatter,
-                )
-                cmd_parser.set_defaults(_command_cls=command_cls, _command_name=command_name)
-
-                for attr_name, (opt, default) in self._global_fields.items():
-                    kwargs = {'help': opt.help}
-                    if default is not None:
-                        kwargs['default'] = default
-                    if opt.action:
-                        kwargs['action'] = opt.action
-                        if opt.action == 'count' and 'default' not in kwargs:
-                            kwargs['default'] = 0
-                    else:
-                        hints = get_type_hints(self.__class__, include_extras=True)
-                        hint = hints[attr_name]
-                        if get_args(hint)[0] == bool:
-                            kwargs['action'] = 'store_true' if not default else 'store_false'
-                    if opt.choices:
-                        kwargs['choices'] = opt.choices
-                    cmd_parser.add_argument(*opt.names, **kwargs)
-
-                self._add_command_args(cmd_parser, command_cls)
+            # try to find command
+            test_path = command_path + [arg]
+            cmd = self.registry.get(*test_path)
+            if cmd:
+                command_path = test_path
+                command_class = cmd
             else:
-                cache_key = '-'.join(path[:i+1])
-                if cache_key in subparser_cache:
-                    parser = subparser_cache[cache_key]
-                else:
-                    if hasattr(parser, '_name_parser_map') and segment in parser._name_parser_map:
-                        existing = parser._name_parser_map[segment]
-                        for action in existing._subparsers._group_actions:
-                            if isinstance(action, _SubParsersAction):
-                                parser = action
-                                subparser_cache[cache_key] = parser
-                                break
-                    else:
-                        sub = parser.add_parser(segment, help=f'{segment} commands')
-                        parser = sub.add_subparsers(dest=f'subcommand_{i}')
-                        subparser_cache[cache_key] = parser
+                # not a command, treat as arguments
+                break
 
-    def _add_command_args(self, parser: ArgumentParser, command_cls: Type[Command]):
-        all_hints = {}
-        for base_cls in reversed(command_cls.__mro__):
-            if base_cls is Command or base_cls is object:
+        if not command_class:
+            raise ValueError(f'Unknown command: {' '.join(remaining)}')
+
+        # remove command path from remaining args
+        remaining = remaining[len(command_path):]
+
+        # parse command-specific options and arguments (including inherited ones)
+        cmd_opts, positional = self._parse_options(
+            remaining,
+            command_class.get_all_options()
+        )
+
+        # parse positional arguments according to Argument definitions (including inherited ones)
+        parsed_args = self._parse_arguments(positional, command_class.get_all_arguments())
+
+        return ParsedCommand(
+            command_path=command_path,
+            command_class=command_class,
+            parsed_args=parsed_args,
+            options=cmd_opts,
+            global_options=global_opts
+        )
+
+    def _parse_arguments(self, positional: list[str], arguments: list[Argument]) -> dict[str, Any]:
+        parsed = {}
+        pos_idx = 0
+
+        for arg_def in arguments:
+            if pos_idx >= len(positional):
+                # no more positional args available
+                if arg_def.required and arg_def.default is None:
+                    raise ValueError(f'Missing required argument: {arg_def.name}')
+
+                parsed[arg_def.name] = arg_def.default
                 continue
-            hints = get_type_hints(base_cls, include_extras=True)
-            all_hints.update(hints)
+            if arg_def.nargs == 1:
+                # single argument
+                parsed[arg_def.name] = self._coerce_argument(
+                    positional[pos_idx],
+                    arg_def
+                )
+                pos_idx += 1
+            elif arg_def.nargs == '?':
+                # zero or one
+                if pos_idx < len(positional):
+                    parsed[arg_def.name] = self._coerce_argument(
+                        positional[pos_idx],
+                        arg_def
+                    )
+                    pos_idx += 1
+                else:
+                    parsed[arg_def.name] = arg_def.default
+            elif arg_def.nargs == '*':
+                # zero or more - consume remaining
+                values = []
+                while pos_idx < len(positional):
+                    values.append(self._coerce_argument(
+                        positional[pos_idx],
+                        arg_def
+                    ))
+                    pos_idx += 1
 
-        for attr_name, hint in all_hints.items():
-            if get_origin(hint) is Annotated:
-                args = get_args(hint)
-                metadata = args[1] if len(args) >= 2 else None
+                parsed[arg_def.name] = values
+            elif arg_def.nargs == '+':
+                # one or more
+                if pos_idx >= len(positional):
+                    raise ValueError(f'Argument {arg_def.name} requires at least one value')
 
-                if isinstance(metadata, Argument):
-                    kwargs = {'help': metadata.help}
-                    if metadata.default is not None:
-                        kwargs['default'] = metadata.default
-                        if metadata.nargs is None:
-                            kwargs['nargs'] = '?'
-                    if metadata.nargs is not None:
-                        kwargs['nargs'] = metadata.nargs
-                    if metadata.choices:
-                        kwargs['choices'] = metadata.choices
+                values = []
+                while pos_idx < len(positional):
+                    values.append(self._coerce_argument(
+                        positional[pos_idx],
+                        arg_def
+                    ))
+                    pos_idx += 1
 
-                    parser.add_argument(attr_name, **kwargs)
-                elif isinstance(metadata, Option):
-                    default_value = None
-                    has_default = False
-                    for base_cls in command_cls.__mro__:
-                        if base_cls is Command or base_cls is object:
-                            continue
-                        if hasattr(base_cls, attr_name):
-                            default_value = getattr(base_cls, attr_name)
-                            has_default = True
-                            break
+                parsed[arg_def.name] = values
+            elif isinstance(arg_def.nargs, int):
+                # exact count
+                if pos_idx + arg_def.nargs > len(positional):
+                    raise ValueError(
+                        f'Argument {arg_def.name} requires {arg_def.nargs} values, '
+                        f'got {len(positional) - pos_idx}'
+                    )
 
-                    kwargs = {'help': metadata.help}
-                    if has_default:
-                        kwargs['default'] = default_value
-                    if metadata.action:
-                        kwargs['action'] = metadata.action
-                        if metadata.action == 'count' and 'default' not in kwargs:
-                            kwargs['default'] = 0
-                    elif args[0] == bool:
-                        kwargs['action'] = 'store_true' if not default_value else 'store_false'
+                values = []
+                for _ in range(arg_def.nargs):
+                    values.append(self._coerce_argument(
+                        positional[pos_idx],
+                        arg_def
+                    ))
+                    pos_idx += 1
 
-                    if metadata.nargs is not None:
-                        if metadata.action not in ('store_true', 'store_false', 'store_const', 'count', 'append_const'):
-                            kwargs['nargs'] = metadata.nargs
+                parsed[arg_def.name] = values if arg_def.nargs > 1 else values[0]
 
-                    if metadata.choices:
-                        kwargs['choices'] = metadata.choices
+        if pos_idx < len(positional):
+            unused = positional[pos_idx:]
+            raise ValueError(f'Unexpected arguments: {', '.join(unused)}')
 
-                    kwargs['required'] = metadata.required
+        return parsed
 
-                    parser.add_argument(*metadata.names, dest=attr_name, **kwargs)
+    def _coerce_argument(self, value: str, argument: Argument) -> Any:
+        if argument.default is None:
+            return value
+
+        target_type = type(argument.default)
+
+        if target_type == bool:
+            return value.lower() in ('true', '1', 'yes', 'y')
+        elif target_type == int:
+            return int(value)
+        elif target_type == float:
+            return float(value)
+        elif target_type == list:
+            return value
+
+        return value
+
+    def _parse_options(self, args: list[str], options: list[Option]) -> tuple[dict[str, Any], list[str]]:
+        parsed = {}
+        positional = []
+        i = 0
+
+        opt_map: dict[str, Option] = {}
+        for opt in options:
+            for flag in opt.flag_names:
+                opt_map[flag] = opt
+
+        while i < len(args):
+            arg = args[i]
+            if arg == '--':
+                positional.extend(args[i + 1:])
+                break
+
+            if arg.startswith('-'):
+                if '=' in arg:
+                    flag, value = arg.split('=', 1)
+                    if flag in opt_map:
+                        opt = opt_map[flag]
+                        parsed[opt.name] = self._coerce_value(value, opt)
+                        i += 1
+                        continue
+                    else:
+                        positional.append(arg)
+                        i += 1
+                        continue
+                if arg in opt_map:
+                    opt = opt_map[arg]
+
+                    expects_value = not (opt.default is False or opt.default is True)
+                    if expects_value and i + 1 < len(args) and not args[i + 1].startswith('-'):
+                        value = args[i + 1]
+                        parsed[opt.name] = self._coerce_value(value, opt)
+                        i += 2
+                    else:
+                        if isinstance(opt.default, bool):
+                            parsed[opt.name] = True
+                            i += 1
+                        elif expects_value and opt.required:
+                            raise ValueError(f'Option {arg} requires a value')
+                        else:
+                            parsed[opt.name] = opt.default
+                            i += 1
+                else:
+                    positional.append(arg)
+                    i += 1
+            else:
+                positional.append(arg)
+                i += 1
+
+        for opt in options:
+            if opt.name not in parsed:
+                if opt.required:
+                    raise ValueError(f'Required option --{opt.name} not provided')
+
+                parsed[opt.name] = opt.default
+
+        return parsed, positional
+
+    def _coerce_value(self, value: str, option: Option) -> Any:
+        if option.default is None:
+            return value
+
+        target_type = type(option.default)
+
+        if target_type == bool:
+            return value.lower() in ('true', '1', 'yes', 'y')
+        elif target_type == int:
+            return int(value)
+        elif target_type == float:
+            return float(value)
+
+        return value
 
     def run(self, argv: Optional[list[str]] = None) -> int:
-        args = self._parser.parse_args(argv)
+        if argv is None:
+            argv = sys.argv
 
-        for attr_name in self._global_fields:
-            setattr(self, attr_name, getattr(args, attr_name))
+        try:
+            parsed = self._parse_args(argv)
 
-        command_cls = getattr(args, '_command_cls', None)
-        if not command_cls:
-            self._parser.print_help(self.stderr)
+            ctx = CommandContext(
+                global_options=ArgAccessor(parsed.global_options),
+                registry=self.registry,
+                cli=self
+            )
+
+            command = parsed.command_class(ctx)
+            accessor = ArgAccessor({**parsed.parsed_args, **parsed.options})
+
+            return command.run(accessor)
+        except Exception as e:
+            # TODO make this overrideable
+            print(f'Error: {e}', file=sys.stderr)
             return 1
-
-        command = command_cls()
-        command._set_io(self.stdin, self.stdout, self.stderr)
-        command._set_commands(self._command_info)
-
-        for base_cls in command_cls.__mro__:
-            if base_cls is Command or base_cls is object:
-                continue
-            hints = get_type_hints(base_cls, include_extras=True)
-            for attr_name in hints:
-                if hasattr(args, attr_name):
-                    setattr(command, attr_name, getattr(args, attr_name))
-
-        return command.run(self)
-
-    @staticmethod
-    def _class_to_command_name(class_name: str) -> str:
-        class_name = class_name.replace('Command', '')
-        result = []
-        for i, c in enumerate(class_name):
-            if c.isupper() and i > 0:
-                result.append('-')
-            result.append(c.lower())
-        return ''.join(result)

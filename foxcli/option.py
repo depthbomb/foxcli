@@ -1,28 +1,25 @@
-from typing import Any, Union, Optional
-from dataclasses import field, dataclass
+from dataclasses import dataclass
+from typing import TypeVar, Generic, Optional
+
+T = TypeVar('T')
 
 @dataclass
-class Option:
-    names: list[str] = field(default_factory=list)
+class Option(Generic[T]):
+    name: str
+    short: Optional[str] = None
+    default: Optional[T] = None
+    required: bool = False
     help: str = ''
-    action: Optional[str] = None
-    choices: Optional[list[Any]] = None
-    nargs: Optional[Union[str, int]] = None
 
-    def __init__(
-            self,
-            *names: str,
-            help: str = '',
-            required: bool = False,
-            action: Optional[str] = None,
-            choices: Optional[list[Any]] = None,
-            nargs: Optional[Union[str, int]] = None,
-    ):
-        self.names = list(names)
-        self.help = help
-        self.required = required
-        self.action = action
-        self.choices = choices
-        self.nargs = nargs
+    @property
+    def flag_names(self) -> list[str]:
+        name = self.name.replace('--', '')
+        names = [f'--{name}']
+
+        if self.short:
+            short = self.short.replace('-', '')
+            names.append(f'-{short}')
+
+        return names
 
 Opt = Option

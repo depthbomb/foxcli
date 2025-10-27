@@ -1,45 +1,57 @@
-import sys
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from typing import Type, TextIO, Optional, TYPE_CHECKING
+from foxcli.option import Option
+from foxcli.argument import Argument
+from foxcli.command_info import CommandInfo
+from foxcli.arg_accessor import ArgAccessor
+from foxcli.command_context import CommandContext
 
-if TYPE_CHECKING:
-    from foxcli.core.cli import CLI
+class Command:
+    name: str = ''
+    description: str = ''
+    aliases: list[str] = []
+    arguments: list[Argument] = []
+    options: list[Option] = []
 
-@dataclass
-class CommandInfo:
-    name: str
-    path: list[str]
-    description: str
-    aliases: list[str]
-    doc: Optional[str]
-    cls: Type['Command']
+    def __init__(self, ctx: CommandContext):
+        self.ctx = ctx
 
-class Command(ABC):
-    def __init__(self):
-        self.stdin: TextIO = sys.stdin
-        self.stdout: TextIO = sys.stdout
-        self.stderr: TextIO = sys.stderr
-        self._commands: dict[str, CommandInfo] = {}
+    @classmethod
+    def get_all_arguments(cls) -> list[Argument]:
+        arguments = []
+        for base in reversed(cls.__mro__):
+            if base is Command or not issubclass(base, Command):
+                continue
 
-    def _set_io(self, stdin: TextIO, stdout: TextIO, stderr: TextIO):
-        """Set I/O streams"""
-        self.stdin = stdin
-        self.stdout = stdout
-        self.stderr = stderr
+            if hasattr(base, 'arguments') and base.arguments:
+                existing_names = {arg.name for arg in arguments}
+                for arg in base.arguments:
+                    if arg.name not in existing_names:
+                        arguments.append(arg)
 
-    def _set_commands(self, commands: dict[str, CommandInfo]):
-        """Injects command registry"""
-        self._commands = commands
+        return arguments
 
-    def get_command(self, name: str) -> Optional[CommandInfo]:
-        """Gets information about a registered command by name or path"""
-        return self._commands.get(name)
+    @classmethod
+    def get_all_options(cls) -> list[Option]:
+        options = []
+        for base in reversed(cls.__mro__):
+            if base is Command or not issubclass(base, Command):
+                continue
 
-    def list_commands(self) -> list[CommandInfo]:
-        """Lists all registered commands"""
-        return list(self._commands.values())
+            if hasattr(base, 'options') and base.options:
+                existing_names = {opt.name for opt in options}
+                for opt in base.options:
+                    if opt.name not in existing_names:
+                        options.append(opt)
 
-    @abstractmethod
-    def run(self, app: 'CLI') -> int:
-        pass
+        return options
+
+    def run(self, args: ArgAccessor) -> int:
+        raise NotImplementedError
+    
+    @classmethod
+    def get_info(cls) -> CommandInfo:
+        return CommandInfo(
+            name=cls.name or cls.__name__.lower(),
+            description=cls.description,
+            aliases=cls.aliases,
+            doc=cls.__doc__
+        )
