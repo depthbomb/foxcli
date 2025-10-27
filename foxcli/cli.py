@@ -307,8 +307,20 @@ class CLI:
         except Exception as e:
             for exc_type, hook_name in self._HOOKS.items():
                 if isinstance(e, exc_type):
-                    if hook_name in self.__class__.__dict__:
+                    base_func = CLI.__dict__.get(hook_name)
+                    sub_func = self.__class__.__dict__.get(hook_name)
+
+                    # only call the hook if actually overridden in subclass
+                    if sub_func is not None and sub_func is not base_func:
                         return getattr(self, hook_name)(e)
 
+            # call `on_error` hook if defined
+            sub_func = self.__class__.__dict__.get('on_error')
+            base_func = CLI.__dict__.get('on_error')
+            if sub_func is not None and sub_func is not base_func:
+                return self.on_error(e)
+
+            # fallback
             print(f'{e.__class__.__name__}: {e}', file=sys.stderr)
+
             return 1

@@ -1,5 +1,13 @@
 # 10/27/2025
 
+## 0.5.1
+
+- Improved error handling hooks
+
+## 0.5.0
+
+- Added `pre_run` and `post_run` command hooks
+
 ## 0.4.1
 
 - Classes that subclass `Command` can now have a constructor
