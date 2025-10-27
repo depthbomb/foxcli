@@ -1,3 +1,6 @@
+> ![IMPORTANT]
+> While foxcli is in development, breaking changes may be made without bumping the major version!
+
 _foxcli_ is a minimal-by-design CLI framework for Python built around argparse.
 
 There are many great CLI frameworks out there, but some features I like in one aren't present in another. Likewise, one framework I like may have features that I don't like or has a bunch of extra features that I don't need.
